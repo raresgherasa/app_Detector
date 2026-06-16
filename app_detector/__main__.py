@@ -1,10 +1,10 @@
-"""Entry point for `python -m app_detector`."""
+"""Entry point: ``python -m app_detector`` → CLI."""
 
 from app_detector.cli import cli
 
 
-def main():
-    cli()
+def main() -> None:
+    cli(prog_name="appdetect")
 
 
 if __name__ == "__main__":

@@ -1,18 +1,17 @@
-"""Manifest — load, save, merge, and validate application snapshots."""
+"""Manifest — portable snapshot of installed apps (load/save/merge/diff)."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app_detector.models.app_entry import AppEntry
-from app_detector.utils.platform_detect import PlatformInfo
+from app_detector.models import AppEntry
+from app_detector.platform_detect import PlatformInfo
 
-
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "2.0"
 
 
 @dataclass
@@ -22,12 +21,16 @@ class Manifest:
     schema_version: str = SCHEMA_VERSION
     created_at: str = ""
     source_os: dict[str, Any] = field(default_factory=dict)
+    filter: dict[str, Any] = field(default_factory=dict)
     apps: list[AppEntry] = field(default_factory=list)
+    configs: dict[str, Any] = field(default_factory=dict)  # app config snapshots
 
     # ── Factory ────────────────────────────────────────────────────────
 
     @classmethod
-    def create(cls, apps: list[AppEntry], platform_info: PlatformInfo) -> "Manifest":
+    def create(cls, apps: list[AppEntry], platform_info: PlatformInfo,
+               flt: dict[str, Any] | None = None,
+               configs: dict[str, Any] | None = None) -> "Manifest":
         return cls(
             schema_version=SCHEMA_VERSION,
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -37,7 +40,9 @@ class Manifest:
                 "hostname": platform_info.hostname,
                 "available_managers": platform_info.available_managers,
             },
+            filter=flt or {},
             apps=apps,
+            configs=configs or {},
         )
 
     # ── Serialisation ──────────────────────────────────────────────────
@@ -47,7 +52,9 @@ class Manifest:
             "schema_version": self.schema_version,
             "created_at": self.created_at,
             "source_os": self.source_os,
+            "filter": self.filter,
             "apps": [a.to_dict() for a in self.apps],
+            "configs": self.configs,
         }
 
     def to_json(self, indent: int = 2) -> str:
@@ -59,7 +66,9 @@ class Manifest:
             schema_version=data.get("schema_version", SCHEMA_VERSION),
             created_at=data.get("created_at", ""),
             source_os=data.get("source_os", {}),
+            filter=data.get("filter", {}),
             apps=[AppEntry.from_dict(a) for a in data.get("apps", [])],
+            configs=data.get("configs", {}),
         )
 
     @classmethod
@@ -73,10 +82,9 @@ class Manifest:
 
     @classmethod
     def load(cls, path: str | Path) -> "Manifest":
-        text = Path(path).read_text(encoding="utf-8")
-        return cls.from_json(text)
+        return cls.from_json(Path(path).read_text(encoding="utf-8"))
 
-    # ── Merge ──────────────────────────────────────────────────────────
+    # ── Merge / diff ───────────────────────────────────────────────────
 
     @staticmethod
     def merge(a: "Manifest", b: "Manifest") -> "Manifest":
@@ -88,11 +96,11 @@ class Manifest:
             if key not in seen:
                 seen.add(key)
                 merged.append(app)
-
         return Manifest(
             schema_version=SCHEMA_VERSION,
             created_at=datetime.now(timezone.utc).isoformat(),
-            source_os=a.source_os,  # keep first manifest's OS info
+            source_os=a.source_os,
+            filter=a.filter,
             apps=merged,
         )
 
@@ -104,7 +112,5 @@ class Manifest:
 
     @property
     def summary(self) -> str:
-        total = len(self.apps)
-        selected = len(self.selected_apps)
         os_label = self.source_os.get("distro", self.source_os.get("family", "unknown"))
-        return f"{total} apps from {os_label} ({selected} selected)"
+        return f"{len(self.apps)} apps from {os_label}"

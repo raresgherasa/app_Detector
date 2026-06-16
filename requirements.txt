@@ -1,3 +1,6 @@
 rich>=13.0
 click>=8.0
 InquirerPy>=0.3.4
+customtkinter>=5.2.0
+darkdetect>=0.8.0
+Pillow>=10.0

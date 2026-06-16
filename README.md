@@ -1,93 +1,154 @@
 # 🔍 App Detector
 
-**Cross-platform application backup & restore tool.**
+**Size & kind aware backup / restore tool for installed applications.**
 
-Never manually reinstall your apps again — App Detector scans your current OS for every installed application, saves the list to a portable manifest file, and lets you restore everything with one command after an OS reinstall.
+Reinstalling your OS? App Detector scans your machine, shows you the apps **you
+actually installed** — filtered by size and kind — saves them to a portable
+snapshot, and reinstalls them on the fresh system.
 
-## Features
+## Why it's different
 
-- **Cross-platform scanning** — Detects apps from apt, dpkg, snap, flatpak, pacman, dnf (Linux), winget, Chocolatey, Windows Registry (Windows), Homebrew, system_profiler, Mac App Store (macOS)
-- **Portable manifest** — JSON file you can store on a USB drive, cloud, or email to yourself
-- **Interactive restore** — Pick exactly which apps to reinstall, with version control per-app
-- **Dry-run mode** — Preview all install commands before running them
-- **Diff & merge** — Compare or combine manifests from different machines
-- **Beautiful CLI** — Rich terminal output with progress bars and colour
+A naive package scan is useless: on a typical Ubuntu box `dpkg` lists **~2800
+packages**, almost all of them low-level libraries, fonts and drivers you never
+chose to install. App Detector enriches every package with three signals and lets
+you filter on them live:
+
+| Signal | What it answers | Source |
+|--------|-----------------|--------|
+| **manual** | Did *you* install it, or was it pulled in as a dependency? | `apt-mark showmanual`, `pacman -Qe`, `dnf userinstalled`, `brew leaves` |
+| **size** | How big is it on disk? | dpkg `Installed-Size`, rpm `%{SIZE}`, registry `EstimatedSize`, `du` |
+| **kind** | App, CLI tool, or library? | `.desktop` launchers + package section + name |
+
+On the same ~2800-package box, the default view collapses to roughly the **~100
+things you actually installed**.
+
+## Scan once, filter live
+
+A scan collects the **full enriched dataset once**; the filters are then an
+instant in-memory view — no rescanning when you change them.
+
+- **Size tiers (the 3 scans):** `All` · `≥100 MB` · `≥1 GB` (or any exact `--min-size`)
+- **Kinds:** Apps · Tools · Libraries
+- **Manual only:** hide auto-installed dependencies (on by default)
+
+**Default view:** manually-installed **Apps + CLI Tools**, libraries hidden.
 
 ## Quick Start
 
-### Installation
+### Easiest: Zero-Setup Launcher (Unix / Linux / macOS)
 
-We recommend using a Python virtual environment to avoid conflicting dependencies.
+The root `./appdetect` script automatically bootstraps a Python virtual environment in `.venv` and installs the package on first run, so you can execute the app immediately with no manual setup:
 
 ```bash
-# 1. Create a virtual environment
-python -m venv .venv
+# Launch the GUI
+./appdetect
 
-# 2. Activate it
-# On Linux/macOS:
-source .venv/bin/activate
-# On Windows:
-# .venv\Scripts\activate
-
-# 3. Install the application (creates the `app-detector` command)
-pip install -e .
+# Run CLI commands
+./appdetect scan
+./appdetect scan -o my_apps.json
 ```
 
-> [!NOTE]
-> If `app-detector` returns "command not found", either your virtual environment isn't activated, or your `PATH` is missing your Python scripts directory. You can always run it directly via Python using:
-> `python -m app_detector [command]`
+### Alternative: Manual Installation (All Platforms)
 
-### Scan & Export
+If you prefer a standard virtual environment or need global installation:
 
 ```bash
-# Scan all installed apps and print a summary
-app-detector scan
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e .
 
-# Export to a portable manifest file
-app-detector scan -o my_apps.appdetector.json
+# Run CLI commands
+app_detector_cli scan
+
+# Launch the GUI
+app_detector
+```
+
+### Scan
+
+```bash
+app_detector_cli scan                       # default: manual apps + tools
+app_detector_cli scan --tier large          # only ≥100 MB
+app_detector_cli scan --tier huge           # only ≥1 GB
+app_detector_cli scan --min-size 250MB      # exact floor
+app_detector_cli scan --include-libraries   # add libraries
+app_detector_cli scan --all-packages        # include auto-pulled deps (everything)
+app_detector_cli scan --kind app            # apps only
+
+app_detector_cli scan -o my_apps.json       # save the filtered view
+app_detector_cli scan --full -o full.json   # save the entire dataset (re-filter later)
 ```
 
 ### Restore
 
-```bash
-# Interactive restore — select what to install
-app-detector restore my_apps.appdetector.json
-
-# Preview commands without installing
-app-detector restore my_apps.appdetector.json --dry-run
-
-# Auto-install everything (no prompts)
-app-detector restore my_apps.appdetector.json --auto
-
-# Filter by name
-app-detector restore my_apps.appdetector.json --search firefox
-```
-
-### Diff & Merge
+Restore is **cross-OS** and **verified**. Each app is resolved to a package
+manager the *target* machine actually has (an apt snapshot installs via
+`dnf`/`brew`/`winget`), then checked for real presence afterwards — a package
+manager that exits 0 without installing can't fake success.
 
 ```bash
-# Compare two machines
-app-detector diff machine_a.json machine_b.json
-
-# Merge into one
-app-detector merge machine_a.json machine_b.json -o combined.json
+app_detector_cli restore my_apps.json --dry-run   # preview the resolved commands
+app_detector_cli restore my_apps.json             # interactive selection
+app_detector_cli restore my_apps.json --auto      # install everything
+app_detector_cli restore full.json --tier large   # re-filter a full snapshot
+app_detector_cli restore my_apps.json --report failed.json   # save failures to retry
+app_detector_cli restore my_apps.json --no-verify --no-config # skip checks/config
 ```
 
-## How It Works
+Apps with no installable manager on this OS are **skipped and listed**, never
+silently dropped. The dry-run annotates each line with `(mapped)`/`(guess)` when
+the source manager differs from the target.
 
-1. **Scan** — Queries every available package manager on your OS
-2. **Export** — Saves a JSON manifest with app names, versions, sources, and metadata
-3. **Restore** — Reads the manifest, lets you toggle apps on/off, choose version policy (same vs latest), then silently installs via the appropriate package manager
+### Capture & restore app config
 
-## Supported Package Managers
+Pass `--with-config` to a scan to also snapshot the configuration that's annoying
+to redo by hand. Restore replays it automatically (disable with `--no-config`).
+Only **safe, idempotent** state is captured — never blind file overwrites.
 
-| OS      | Managers                                          |
-|---------|---------------------------------------------------|
-| Linux   | apt/dpkg, dnf/rpm, pacman, snap, flatpak          |
-| Windows | winget, Chocolatey, Registry detection             |
-| macOS   | Homebrew (formula + cask), system_profiler, mas    |
+```bash
+app_detector_cli scan --with-config -o my_apps.json
+```
 
-## Running Tests
+| Handler | Captures | Restores via |
+|---------|----------|--------------|
+| VS Code extensions | `code --list-extensions` | `code --install-extension` |
+| Git global config | `git config --global --list` | `git config --global` |
+
+### Fix a misclassification (sticks across scans)
+
+When the App/Tool/Library guess is wrong, correct it once — the override is
+re-applied on every future scan.
+
+```bash
+app_detector_cli classify docker.io tool      # set
+app_detector_cli classify docker.io --clear    # forget
+```
+
+### Compare machines — or your snapshot vs. right now
+
+```bash
+app_detector_cli diff machine_a.json machine_b.json
+app_detector_cli diff my_apps.json --live      # what the snapshot has that I'm missing now
+app_detector_cli merge machine_a.json machine_b.json -o combined.json
+```
+
+### GUI
+
+```bash
+app_detector            # or: python -m app_detector.gui.main
+```
+
+Scan once, then drag the size tier / toggle kind checkboxes / flip the
+"manually installed only" switch and watch the list and totals update instantly.
+
+## Supported sources
+
+| OS | Sources |
+|----|---------|
+| Linux | apt/dpkg, dnf/rpm, pacman, snap, flatpak |
+| Windows | Registry (uninstall keys), winget, Chocolatey |
+| macOS | system_profiler, Homebrew (formulae + casks) |
+
+## Tests
 
 ```bash
 pip install pytest

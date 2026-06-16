@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# appdetect — launcher for App Detector.
+#
+#   ./appdetect              Launch the GUI
+#   ./appdetect gui          Launch the GUI
+#   ./appdetect scan ...     Run a CLI command (scan / restore / diff / merge)
+#   ./appdetect --help       Show CLI help
+#
+# On first run this bootstraps a local virtual environment in .venv and
+# installs the package, so the app "just works" with no manual setup.
+
+set -euo pipefail
+
+# Resolve the directory this script lives in, following symlinks, so the app
+# can be invoked from anywhere (e.g. via a symlink on PATH).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+VENV="$ROOT/.venv"
+PYTHON="$VENV/bin/python"
+
+# Bootstrap the virtual environment on first run (or if it was deleted).
+if [ ! -x "$PYTHON" ]; then
+    echo "appdetect: setting up virtual environment (first run)…" >&2
+    base_python="$(command -v python3 || command -v python || true)"
+    if [ -z "$base_python" ]; then
+        echo "appdetect: error: python3 is required but was not found on PATH." >&2
+        exit 1
+    fi
+    "$base_python" -m venv "$VENV"
+    "$PYTHON" -m pip install --quiet --upgrade pip
+    "$PYTHON" -m pip install --quiet -e "$ROOT"
+fi
+
+# Ensure the package is importable (e.g. venv predates this checkout).
+if ! "$PYTHON" -c "import app_detector" >/dev/null 2>&1; then
+    echo "appdetect: installing app_detector into the virtual environment…" >&2
+    "$PYTHON" -m pip install --quiet -e "$ROOT"
+fi
+
+# Dispatch: no args or "gui" → GUI; anything else → CLI.
+if [ "$#" -eq 0 ] || [ "${1:-}" = "gui" ]; then
+    [ "${1:-}" = "gui" ] && shift
+    exec "$PYTHON" -m app_detector.gui.main "$@"
+fi
+
+exec "$PYTHON" -m app_detector "$@"

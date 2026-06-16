@@ -1,10 +1,12 @@
-import sys
-from app_detector.gui.app import AppDetectorGUI
+"""GUI entry point."""
 
-def run_gui():
-    """Entry point for the GUI application."""
-    app = AppDetectorGUI()
-    app.mainloop()
+from __future__ import annotations
+
+
+def run_gui() -> None:
+    from app_detector.gui.app import AppDetectorGUI
+    AppDetectorGUI().mainloop()
+
 
 if __name__ == "__main__":
     run_gui()

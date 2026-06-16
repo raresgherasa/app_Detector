@@ -1,7 +1,7 @@
 [project]
 name = "app-detector"
-version = "0.1.0"
-description = "Cross-platform application backup & restore tool"
+version = "0.2.0"
+description = "Size & kind aware backup/restore tool for installed applications"
 requires-python = ">=3.10"
 dependencies = [
     "rich>=13.0",
@@ -9,8 +9,11 @@ dependencies = [
     "InquirerPy>=0.3.4",
     "customtkinter>=5.2.0",
     "darkdetect>=0.8.0",
-    "PyQt5; sys_platform == 'linux'",
+    "Pillow>=10.0",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
 
 [project.scripts]
 app_detector_cli = "app_detector.__main__:main"
@@ -19,3 +22,6 @@ app_detector = "app_detector.gui.main:run_gui"
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app_detector*"]

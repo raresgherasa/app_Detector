@@ -1,87 +1,50 @@
-"""Tests for the Manifest class."""
+"""Tests for manifest save/load/merge round-trips (schema 2.0)."""
 
-import json
-import tempfile
-from pathlib import Path
+from app_detector.manifest import SCHEMA_VERSION, Manifest
+from app_detector.models import AppEntry, Kind, ScanFilter
+from app_detector.platform_detect import PlatformInfo
 
-from app_detector.core.manifest import Manifest
-from app_detector.models.app_entry import AppEntry
-
-
-def _sample_app(**overrides) -> AppEntry:
-    defaults = dict(
-        name="TestApp",
-        package_id="testapp",
-        version="1.0.0",
-        source="apt",
-    )
-    defaults.update(overrides)
-    return AppEntry(**defaults)
+MB = 1024 * 1024
 
 
-# ── Round-trip serialisation ────────────────────────────────────────────────
-
-def test_manifest_json_roundtrip():
-    apps = [_sample_app(), _sample_app(name="Other", package_id="other")]
-    m = Manifest.create(apps, _fake_platform())
-    text = m.to_json()
-    m2 = Manifest.from_json(text)
-
-    assert len(m2.apps) == 2
-    assert m2.apps[0].name == "TestApp"
-    assert m2.schema_version == m.schema_version
-
-
-def test_manifest_file_roundtrip(tmp_path: Path):
-    apps = [_sample_app()]
-    m = Manifest.create(apps, _fake_platform())
-    out = tmp_path / "test.json"
-    m.save(out)
-    m2 = Manifest.load(out)
-    assert m2.apps[0].package_id == "testapp"
-
-
-# ── Merge ───────────────────────────────────────────────────────────────────
-
-def test_manifest_merge_deduplicates():
-    a = Manifest.create([_sample_app()], _fake_platform())
-    b = Manifest.create(
-        [_sample_app(), _sample_app(name="New", package_id="new")],
-        _fake_platform(),
-    )
-    merged = Manifest.merge(a, b)
-    assert len(merged.apps) == 2  # testapp + new, no duplicate
-
-
-def test_manifest_merge_keeps_all_unique():
-    a = Manifest.create([_sample_app(package_id="a")], _fake_platform())
-    b = Manifest.create([_sample_app(package_id="b")], _fake_platform())
-    merged = Manifest.merge(a, b)
-    assert len(merged.apps) == 2
-
-
-# ── Schema validation ──────────────────────────────────────────────────────
-
-def test_from_dict_missing_fields():
-    data = {"apps": [{"name": "X", "package_id": "x", "version": "1", "source": "apt"}]}
-    m = Manifest.from_dict(data)
-    assert len(m.apps) == 1
-    assert m.schema_version == "1.0"
-
-
-# ── Selected apps ──────────────────────────────────────────────────────────
-
-def test_selected_apps():
-    apps = [
-        _sample_app(is_selected=True),
-        _sample_app(name="Skip", package_id="skip", is_selected=False),
+def _apps():
+    return [
+        AppEntry("firefox", "firefox", "120.0", "apt", 250 * MB, Kind.APP, True),
+        AppEntry("git", "git", "2.43", "apt", 30 * MB, Kind.TOOL, True),
     ]
-    m = Manifest.create(apps, _fake_platform())
-    assert len(m.selected_apps) == 1
 
 
-# ── Helper ──────────────────────────────────────────────────────────────────
+def _info():
+    return PlatformInfo("linux", "Ubuntu 24.04", "box", ["apt", "snap"])
 
-def _fake_platform():
-    from app_detector.utils.platform_detect import PlatformInfo
-    return PlatformInfo(family="linux", distro="TestOS 1.0", hostname="test")
+
+def test_create_records_schema_filter_and_os():
+    m = Manifest.create(_apps(), _info(), ScanFilter().to_dict())
+    assert m.schema_version == SCHEMA_VERSION
+    assert m.source_os["distro"] == "Ubuntu 24.04"
+    assert m.filter["manual_only"] is True
+
+
+def test_json_roundtrip_preserves_fields():
+    m = Manifest.create(_apps(), _info(), ScanFilter().to_dict())
+    m2 = Manifest.from_json(m.to_json())
+    assert len(m2.apps) == 2
+    a = m2.apps[0]
+    assert a.name == "firefox" and a.kind is Kind.APP and a.size_bytes == 250 * MB
+
+
+def test_file_roundtrip(tmp_path):
+    m = Manifest.create(_apps(), _info())
+    path = tmp_path / "snap.json"
+    m.save(path)
+    loaded = Manifest.load(path)
+    assert [a.package_id for a in loaded.apps] == ["firefox", "git"]
+
+
+def test_merge_dedups_by_id_and_source():
+    a = Manifest.create(_apps(), _info())
+    extra = _apps() + [AppEntry("vlc", "vlc", "3.0", "snap", 90 * MB, Kind.APP, True)]
+    b = Manifest.create(extra, _info())
+    merged = Manifest.merge(a, b)
+    ids = sorted(x.package_id for x in merged.apps)
+    assert ids == ["firefox", "git", "vlc"]
